@@ -14,7 +14,7 @@ def load_data():
         records.append(
             ShiftRecord(
                 # change these according to your model fields
-                reason=row["REASON"],
+                activity_reason=row["REASON"],
             )
         )
 
