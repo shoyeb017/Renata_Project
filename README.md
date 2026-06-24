@@ -1,4 +1,4 @@
-# Shift Ops Console — Employee Shift Operational Analytics Dashboard
+# Employee Shift Operational Analytics Dashboard
 
 A full-stack web application that turns raw, messy employee shift logs into an operational picture a plant manager can act on: an efficiency score, downtime breakdown, breakdown-streak detection, a data-quality audit, and auto-generated insights — all driven by configuration stored in the database, never hardcoded into the application logic.
 
@@ -345,55 +345,3 @@ The **Breakdown Streaks** panel shows a timeline bar chart of failure hours acro
 The **Data Quality Report** panel shows the dataset's validity percentage, record counts, aggregate stats, and a breakdown of detected anomalies (zero-hour records, negative-hour records, statistical outliers, duplicates) — a quick gut-check on how trustworthy the loaded data is.
 
 ---
-
-## 10. Testing
-
-### Backend — 40 tests
-
-```bash
-cd backend
-python manage.py test shifts -v 2
-```
-
-Covers: data cleaning (missing values, malformed dates, invalid timestamps, overnight shifts, duration mismatches, duplicates, zero/ negative/outlier anomaly counting), the analytics engine (efficiency calculation, distribution percentages, streak detection with severity, data quality report shape), config auto-registration, the dataset ingestion service (upload creates a new active dataset, switching deactivates the previous one without deleting it), and the full API surface — including explicit tests that `/breakdown-streaks` and `/data-quality-report` return identical results regardless of filter query parameters.
-
-### Frontend — 25 tests
-
-```bash
-cd frontend
-npm test
-```
-
-Covers component rendering and behavior for KPI cards, the dynamic filter panel (chip toggling, reset visibility), the Gantt chart's required axis labels, the dataset upload/switch panel, the insight cards' severity display, the data quality report's anomaly list, and the breakdown streaks detail view.
-
----
-
-## 11. Assumptions Log
-
-### Cleaning (`shifts/cleaning.py`)
-
-1. A row is dropped only if unrecoverable: no parseable date **and** no way to establish both a start and end time.
-2. Missing START or END (not both): derived from the other timestamp ± `HOURS`.
-3. Malformed `DAY_DATE` with a valid `START`: date derived from `START`instead of dropping the row.
-4. Unparseable timestamp strings are treated as missing, then handled by rule 2.
-5. `END` before `START` is treated as an overnight shift (rolled forward one day) **unless** that implies more than 16 continuous hours, in which case it's rejected as implausible.
-6. `HOURS` vs. `END - START` mismatches beyond a 3-minute tolerance are recalculated from timestamps (the more granular, less error-prone source).
-7. Missing `REASON` becomes `"Unspecified"` rather than being dropped, so the hours aren't lost from totals.
-8. Exact duplicates (same date, start, end, reason) are removed, keeping the first occurrence.
-9. Anomaly counters (zero/negative hours) reflect the **raw** `HOURS`value as supplied, even though the row itself gets repaired and kept. Outliers are flagged post-cleaning, at or above the 95th percentile of cleaned durations.
-
-### Breakdown Streaks (`shifts/analytics.py`)
-
-See §8.4 above for the full algorithm and severity bands.
-
-### Insights (`shifts/insights.py`)
-
-Efficiency severity escalates as the score falls further below the configured low-efficiency threshold (`efficiency_low_threshold_pct`, default 70%). Breakdown risk severity inherits directly from the most significant currently-active streak. Optimization-opportunity severity is `Medium` once a non-failure, non-productive category exceeds 15% of total hours, `Low` otherwise — all of which are computed thresholds, not hardcoded text.
-
----
-
-## 12. Known Limitations
-
-- The Gantt timeline and breakdown-streak timeline are hand-rolled SVG components rather than charting-library components, since neither Recharts, ECharts, nor D3-via-React ships a ready-made Gantt chart — flagged here as an explicit, deliberate exception to "use a charting library for everything."
-- Authentication is not implemented — this is an internal-tool MVP. Add DRF's `IsAuthenticated` plus a session/token scheme before exposing this outside a trusted network.
-- Uploaded datasets are kept indefinitely (by design, so users can switch back). For long-running production use, consider adding a retention/ cleanup policy for old uploads.
