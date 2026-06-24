@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from config_app.loader import load_data
+from config_app.data_loader import load_data
 
 
 class Command(BaseCommand):
