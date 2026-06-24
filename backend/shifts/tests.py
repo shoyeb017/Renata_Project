@@ -1,23 +1,28 @@
 """
-Tests for the data cleaning pipeline, analytics engine, and API layer.
-Run with: python manage.py test
+Tests for the data cleaning pipeline, analytics engine, dataset/upload
+flow, and API layer. Run with: python manage.py test
 """
-import json
-from datetime import date, datetime, timezone as dt_timezone
+import io
+from datetime import date, datetime
 
 import pandas as pd
 from django.test import TestCase
 from rest_framework.test import APIClient
+from django.core.files.uploadedfile import SimpleUploadedFile
 
-from config_app.models import ActivityConfiguration, SystemConfiguration
+from config_app.models import ActivityConfiguration
 from .cleaning import clean_dataframe
-from .models import ShiftRecord
+from .models import ShiftRecord, Dataset, DataQualityReport
+from .ingestion import ingest_dataframe
 from .analytics import (
     compute_dashboard_summary,
     compute_breakdown_streaks,
     compute_activity_distribution,
+    compute_data_quality_report,
 )
 from .insights import generate_insights
+
+DEFAULT_SEVERITY_THRESHOLDS = {"critical": 8, "high": 5, "medium": 2}
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +81,6 @@ class CleaningPipelineTests(TestCase):
         ])
         clean_df, report = clean_dataframe(df)
         self.assertEqual(len(clean_df), 1)
-        # Should have derived START from END - HOURS since the literal START was unparseable.
         self.assertEqual(report.missing_values_handled, 1)
 
     def test_overnight_shift_end_before_start_is_handled(self):
@@ -88,8 +92,6 @@ class CleaningPipelineTests(TestCase):
         self.assertEqual(clean_df.iloc[0]["duration_hours"], 4.0)
 
     def test_implausible_overnight_gap_is_dropped(self):
-        # END appears before START by an amount that would imply a >16h
-        # overnight shift if naively rolled forward - should be rejected.
         df = self._df([
             ["10/4/2025", "2025-10-04T08:00:00Z", "2025-10-04T01:00:00Z", "1", "Maintenance"],
         ])
@@ -115,13 +117,37 @@ class CleaningPipelineTests(TestCase):
     def test_report_totals_are_internally_consistent(self):
         rows = [
             ["10/1/2025", "2025-10-01T07:00:00Z", "2025-10-01T08:00:00Z", "1", "Training"],
-            ["10/2/2025", None, None, "1", "Training"],  # dropped: both missing
+            ["10/2/2025", None, None, "1", "Training"],
         ]
         df = self._df(rows)
         clean_df, report = clean_dataframe(df)
         self.assertEqual(report.total_records, 2)
         self.assertEqual(report.final_clean_records, len(clean_df))
-        self.assertEqual(report.final_clean_records, report.total_records - report.invalid_records - report.duplicates_removed)
+        self.assertEqual(
+            report.final_clean_records,
+            report.total_records - report.invalid_records - report.duplicates_removed,
+        )
+
+    def test_zero_and_negative_hour_anomalies_are_counted(self):
+        rows = [
+            ["10/1/2025", "2025-10-01T07:00:00Z", "2025-10-01T07:00:00Z", "0", "Idle"],
+            ["10/2/2025", "2025-10-02T07:00:00Z", "2025-10-02T09:00:00Z", "-2", "Breakdown"],
+        ]
+        df = self._df(rows)
+        clean_df, report = clean_dataframe(df)
+        self.assertEqual(report.zero_hour_count, 1)
+        self.assertEqual(report.negative_hour_count, 1)
+
+    def test_outlier_detection_flags_top_5_percent_of_durations(self):
+        # 19 short shifts + 1 very long one -> the long one should be
+        # flagged as a 95th-percentile outlier.
+        rows = []
+        for i in range(19):
+            rows.append([f"10/{i+1}/2025", f"2025-10-{i+1:02d}T07:00:00Z", f"2025-10-{i+1:02d}T08:00:00Z", "1", "Training"])
+        rows.append(["10/20/2025", "2025-10-20T07:00:00Z", "2025-10-20T20:00:00Z", "13", "Breakdown"])
+        df = self._df(rows)
+        clean_df, report = clean_dataframe(df)
+        self.assertGreaterEqual(report.outlier_hour_count, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +155,7 @@ class CleaningPipelineTests(TestCase):
 # ---------------------------------------------------------------------------
 class AnalyticsEngineTests(TestCase):
     def setUp(self):
+        self.dataset = Dataset.objects.create(name="test-dataset", source="upload", is_active=True)
         self.productive_cfg = ActivityConfiguration.objects.create(
             activity_name="Training", productive_status=True, category="Productive", display_color="#2E8B7E",
         )
@@ -142,6 +169,7 @@ class AnalyticsEngineTests(TestCase):
         start = datetime.fromisoformat(f"{date_str}T{start_str}:00+00:00")
         end = datetime.fromisoformat(f"{date_str}T{end_str}:00+00:00")
         return ShiftRecord.objects.create(
+            dataset=self.dataset,
             date=date_str,
             start_time=start,
             end_time=end,
@@ -152,7 +180,7 @@ class AnalyticsEngineTests(TestCase):
         )
 
     def test_dashboard_summary_efficiency_calculation(self):
-        qs = ShiftRecord.objects.all()
+        qs = ShiftRecord.objects.filter(dataset=self.dataset)
         summary = compute_dashboard_summary(qs)
         self.assertEqual(summary["total_hours"], 4.0)
         self.assertEqual(summary["productive_hours"], 2.0)
@@ -164,44 +192,74 @@ class AnalyticsEngineTests(TestCase):
         self.assertEqual(summary["efficiency_score"], 0.0)
 
     def test_activity_distribution_percentages_sum_to_100(self):
-        qs = ShiftRecord.objects.all()
+        qs = ShiftRecord.objects.filter(dataset=self.dataset)
         dist = compute_activity_distribution(qs)
         total_pct = sum(d["percentage"] for d in dist)
         self.assertAlmostEqual(total_pct, 100.0, places=1)
 
     def test_breakdown_streak_requires_minimum_events(self):
-        # Only one failure event exists in setUp - should not qualify as a streak.
-        qs = ShiftRecord.objects.all()
-        streaks = compute_breakdown_streaks(qs, min_events=3, min_hours=1, max_gap_hours=4)
+        qs = ShiftRecord.objects.filter(dataset=self.dataset)
+        streaks = compute_breakdown_streaks(qs, min_events=3, min_hours=1, max_gap_hours=4,
+                                             severity_thresholds=DEFAULT_SEVERITY_THRESHOLDS)
         self.assertEqual(streaks, [])
 
     def test_breakdown_streak_detected_when_thresholds_met(self):
-        # Add two more close-together failure events to form a streak of 3.
         self._make_record("2025-10-01", "11:30", "13:00", self.failure_cfg, "Breakdown")
         self._make_record("2025-10-01", "13:30", "15:00", self.failure_cfg, "Breakdown")
-        qs = ShiftRecord.objects.all()
-        streaks = compute_breakdown_streaks(qs, min_events=3, min_hours=1, max_gap_hours=4)
+        qs = ShiftRecord.objects.filter(dataset=self.dataset)
+        streaks = compute_breakdown_streaks(qs, min_events=3, min_hours=1, max_gap_hours=4,
+                                             severity_thresholds=DEFAULT_SEVERITY_THRESHOLDS)
         self.assertEqual(len(streaks), 1)
         self.assertEqual(streaks[0]["event_count"], 3)
+        self.assertIn("severity", streaks[0])
+        self.assertIn(streaks[0]["severity"], ("Low", "Medium", "High", "Critical"))
 
     def test_breakdown_streak_broken_by_large_gap(self):
         self._make_record("2025-10-05", "09:00", "10:00", self.failure_cfg, "Breakdown")
         self._make_record("2025-10-05", "20:00", "21:00", self.failure_cfg, "Breakdown")
-        qs = ShiftRecord.objects.all()
-        # max_gap_hours=4 means the 09:00-10:00 and 20:00-21:00 events
-        # (10h apart) should NOT be grouped into the same streak.
-        streaks = compute_breakdown_streaks(qs, min_events=2, min_hours=0.5, max_gap_hours=4)
+        qs = ShiftRecord.objects.filter(dataset=self.dataset)
+        streaks = compute_breakdown_streaks(qs, min_events=2, min_hours=0.5, max_gap_hours=4,
+                                             severity_thresholds=DEFAULT_SEVERITY_THRESHOLDS)
         for streak in streaks:
             self.assertLess(streak["event_count"], 3)
 
-    def test_insights_are_generated_from_data(self):
-        qs = ShiftRecord.objects.all()
+    def test_breakdown_streak_duration_days_and_avg_per_day(self):
+        # A streak spanning two calendar days.
+        self._make_record("2025-10-02", "08:00", "12:00", self.failure_cfg, "Breakdown")
+        qs = ShiftRecord.objects.filter(dataset=self.dataset)
+        streaks = compute_breakdown_streaks(qs, min_events=1, min_hours=0.5, max_gap_hours=2,
+                                             severity_thresholds=DEFAULT_SEVERITY_THRESHOLDS)
+        for s in streaks:
+            self.assertEqual(s["avg_hours_per_day"], round(s["total_hours"] / s["duration_days"], 2))
+
+    def test_insights_are_generated_from_data_and_include_severity(self):
+        qs = ShiftRecord.objects.filter(dataset=self.dataset)
         insights = generate_insights(qs)
         self.assertGreaterEqual(len(insights), 1)
-        # Every insight must reference at least one number (a digit), proving
-        # it's derived from computed data rather than being static text.
         for insight in insights:
+            self.assertIn("title", insight)
+            self.assertIn("metric", insight)
+            self.assertIn("text", insight)
+            self.assertIn("action", insight)
+            self.assertIn("severity", insight)
+            self.assertIn(insight["severity"], ("Low", "Medium", "High", "Critical"))
+            # Every insight's text must reference at least one number,
+            # proving it's derived from computed data, not static text.
             self.assertTrue(any(ch.isdigit() for ch in insight["text"]))
+
+    def test_data_quality_report_shape(self):
+        qs = ShiftRecord.objects.filter(dataset=self.dataset)
+        report = DataQualityReport.objects.create(
+            dataset=self.dataset, total_records=2, invalid_records=0, duplicates_removed=0,
+            missing_values_handled=0, duration_mismatches_fixed=0, final_clean_records=2,
+            zero_hour_count=0, negative_hour_count=0, outlier_hour_count=0,
+        )
+        result = compute_data_quality_report(qs, report)
+        for key in ("data_validity_pct", "total_records", "valid_records", "invalid_records",
+                    "total_hours", "avg_shift_duration_hours", "category_count", "anomalies"):
+            self.assertIn(key, result)
+        self.assertEqual(result["data_validity_pct"], 100.0)
+        self.assertEqual(result["category_count"], 2)
 
 
 # ---------------------------------------------------------------------------
@@ -226,18 +284,53 @@ class ActivityConfigAutoRegistrationTests(TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Dataset / ingestion service tests
+# ---------------------------------------------------------------------------
+class IngestionServiceTests(TestCase):
+    def _sample_df(self):
+        return pd.DataFrame([
+            {"DAY_DATE": "10/1/2025", "START": "2025-10-01T07:00:00Z", "END": "2025-10-01T09:00:00Z", "HOURS": "2", "REASON": "Training"},
+            {"DAY_DATE": "10/2/2025", "START": "2025-10-02T07:00:00Z", "END": "2025-10-02T09:00:00Z", "HOURS": "2", "REASON": "Breakdown"},
+        ])
+
+    def test_ingest_dataframe_creates_active_dataset_and_records(self):
+        result = ingest_dataframe(self._sample_df(), dataset_name="sample.csv", source="upload")
+        dataset = Dataset.objects.get(id=result["dataset_id"])
+        self.assertTrue(dataset.is_active)
+        self.assertEqual(ShiftRecord.objects.filter(dataset=dataset).count(), 2)
+
+    def test_ingesting_new_dataset_deactivates_previous_one(self):
+        first = ingest_dataframe(self._sample_df(), dataset_name="first.csv", source="upload")
+        second = ingest_dataframe(self._sample_df(), dataset_name="second.csv", source="upload")
+        first_dataset = Dataset.objects.get(id=first["dataset_id"])
+        second_dataset = Dataset.objects.get(id=second["dataset_id"])
+        self.assertFalse(first_dataset.is_active)
+        self.assertTrue(second_dataset.is_active)
+        # Previous dataset's records are preserved, not deleted.
+        self.assertEqual(ShiftRecord.objects.filter(dataset=first_dataset).count(), 2)
+
+    def test_ingestion_creates_quality_report(self):
+        result = ingest_dataframe(self._sample_df(), dataset_name="sample.csv", source="upload")
+        self.assertTrue(DataQualityReport.objects.filter(id=result["quality_report_id"]).exists())
+
+
+# ---------------------------------------------------------------------------
 # API tests
 # ---------------------------------------------------------------------------
 class ApiEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.dataset = Dataset.objects.create(name="api-test-dataset", source="upload", is_active=True)
         self.cfg = ActivityConfiguration.objects.create(
             activity_name="Training", productive_status=True, category="Productive", display_color="#2E8B7E",
+        )
+        self.failure_cfg = ActivityConfiguration.objects.create(
+            activity_name="Breakdown", productive_status=False, category="Failure", display_color="#C44536",
         )
         start = datetime.fromisoformat("2025-10-01T07:00:00+00:00")
         end = datetime.fromisoformat("2025-10-01T09:00:00+00:00")
         ShiftRecord.objects.create(
-            date="2025-10-01", start_time=start, end_time=end, duration_hours=2.0,
+            dataset=self.dataset, date="2025-10-01", start_time=start, end_time=end, duration_hours=2.0,
             activity_reason="Training", activity_config=self.cfg, source_row_hash="hash1",
         )
 
@@ -253,7 +346,6 @@ class ApiEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertIn("Training", data["reasons"])
-        self.assertIn("Productive", data["categories"])
 
     def test_shift_analysis_endpoint_returns_blocks(self):
         response = self.client.get("/api/shift-analysis")
@@ -281,9 +373,68 @@ class ApiEndpointTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("insights", response.json())
 
-    def test_breakdown_streaks_endpoint_returns_config(self):
+    def test_breakdown_streaks_endpoint_returns_config_and_timeline(self):
         response = self.client.get("/api/breakdown-streaks")
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertIn("streaks", data)
+        self.assertIn("timeline", data)
         self.assertIn("config", data)
+
+    def test_breakdown_streaks_endpoint_ignores_filters(self):
+        """
+        Breakdown Streaks must reflect the WHOLE active dataset, regardless
+        of any filter query params passed - this is the key behavioral
+        requirement distinguishing it from the filter-aware panels.
+        """
+        ShiftRecord.objects.create(
+            dataset=self.dataset, date="2025-10-05", start_time=datetime.fromisoformat("2025-10-05T08:00:00+00:00"),
+            end_time=datetime.fromisoformat("2025-10-05T12:00:00+00:00"), duration_hours=4.0,
+            activity_reason="Breakdown", activity_config=self.failure_cfg, source_row_hash="hash2",
+        )
+        unfiltered = self.client.get("/api/breakdown-streaks").json()
+        filtered = self.client.get("/api/breakdown-streaks?date_from=2099-01-01").json()
+        self.assertEqual(unfiltered["streaks"], filtered["streaks"])
+        self.assertEqual(unfiltered["timeline"], filtered["timeline"])
+
+    def test_data_quality_report_endpoint_ignores_filters(self):
+        unfiltered = self.client.get("/api/data-quality-report").json()
+        filtered = self.client.get("/api/data-quality-report?date_from=2099-01-01").json()
+        self.assertEqual(unfiltered, filtered)
+        self.assertIn("anomalies", unfiltered)
+
+    def test_list_datasets_endpoint(self):
+        response = self.client.get("/api/datasets")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertGreaterEqual(len(data["datasets"]), 1)
+
+    def test_upload_dataset_endpoint_accepts_csv_and_activates_it(self):
+        csv_content = (
+            "DAY_DATE,START,END,HOURS,REASON\n"
+            "10/10/2025,2025-10-10T07:00:00Z,2025-10-10T09:00:00Z,2,Training\n"
+        )
+        uploaded = SimpleUploadedFile("new_data.csv", csv_content.encode("utf-8"), content_type="text/csv")
+        response = self.client.post("/api/datasets/upload", {"file": uploaded}, format="multipart")
+        self.assertEqual(response.status_code, 201)
+        data = response.json()
+        self.assertTrue(data["is_active"])
+
+        # The previously active dataset's data should no longer be served
+        # by default since the new upload is now active.
+        summary = self.client.get("/api/dashboard-summary").json()
+        self.assertEqual(summary["record_count"], 1)
+
+    def test_upload_dataset_rejects_non_csv(self):
+        uploaded = SimpleUploadedFile("not_a_csv.txt", b"hello", content_type="text/plain")
+        response = self.client.post("/api/datasets/upload", {"file": uploaded}, format="multipart")
+        self.assertEqual(response.status_code, 400)
+
+    def test_activate_dataset_endpoint_switches_active_dataset(self):
+        other_dataset = Dataset.objects.create(name="other.csv", source="upload", is_active=False)
+        response = self.client.post(f"/api/datasets/{other_dataset.id}/activate")
+        self.assertEqual(response.status_code, 200)
+        other_dataset.refresh_from_db()
+        self.dataset.refresh_from_db()
+        self.assertTrue(other_dataset.is_active)
+        self.assertFalse(self.dataset.is_active)

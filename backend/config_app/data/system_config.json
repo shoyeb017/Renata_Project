@@ -2,17 +2,17 @@
   "settings": [
     {
       "configuration_name": "breakdown_streak_minimum_events",
-      "configuration_value": "3",
-      "description": "Minimum number of consecutive failure-category events to qualify as a breakdown streak."
+      "configuration_value": "2",
+      "description": "Minimum number of failure-category events (within max_gap_hours of each other) to qualify as a breakdown streak."
     },
     {
       "configuration_name": "breakdown_streak_minimum_hours",
-      "configuration_value": "5",
+      "configuration_value": "4",
       "description": "Minimum cumulative duration (hours) across the streak's events to qualify as a breakdown streak."
     },
     {
       "configuration_name": "breakdown_streak_max_gap_hours",
-      "configuration_value": "4",
+      "configuration_value": "6",
       "description": "Maximum gap (hours) allowed between two failure events for them to be considered part of the same continuous streak."
     },
     {
@@ -24,6 +24,21 @@
       "configuration_name": "insight_minimum_sample_hours",
       "configuration_value": "1",
       "description": "Minimum total hours of data required in a bucket before an insight is generated about it (avoids noisy conclusions from tiny samples)."
+    },
+    {
+      "configuration_name": "streak_severity_critical_avg_hours",
+      "configuration_value": "8",
+      "description": "A breakdown streak whose average failure hours per calendar day spanned is >= this value is classified Critical severity."
+    },
+    {
+      "configuration_name": "streak_severity_high_avg_hours",
+      "configuration_value": "5",
+      "description": "A breakdown streak whose average failure hours per calendar day spanned is >= this value (and below the Critical threshold) is classified High severity."
+    },
+    {
+      "configuration_name": "streak_severity_medium_avg_hours",
+      "configuration_value": "2",
+      "description": "A breakdown streak whose average failure hours per calendar day spanned is >= this value (and below the High threshold) is classified Medium severity. Below this is Low severity."
     }
   ]
 }

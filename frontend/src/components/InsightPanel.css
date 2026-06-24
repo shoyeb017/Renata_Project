@@ -1,37 +1,88 @@
-.insight-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.insight-card {
+  background: var(--panel-2);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--hairline-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
-.insight-item {
+.insight-card__header {
   display: flex;
-  gap: var(--space-3);
-  align-items: flex-start;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
 }
 
-.insight-item__index {
-  color: var(--signal-amber);
-  font-size: 12px;
-  padding-top: 2px;
+.insight-card__title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.insight-card__severity {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 10px;
   flex-shrink: 0;
 }
 
-.insight-item__category {
-  display: block;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  margin-bottom: 2px;
+.insight-card__severity--critical {
+  background: rgba(196, 69, 54, 0.16);
+  color: var(--status-bad);
 }
 
-.insight-item__text {
+.insight-card__severity--high {
+  background: rgba(217, 113, 74, 0.16);
+  color: #D9714A;
+}
+
+.insight-card__severity--medium {
+  background: rgba(217, 180, 74, 0.16);
+  color: var(--status-warn);
+}
+
+.insight-card__severity--low {
+  background: var(--panel-3);
+  color: var(--text-tertiary);
+}
+
+.insight-card__metric {
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.insight-card__text {
   margin: 0;
   font-size: 13px;
   line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.insight-card__action {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--text-primary);
+  border-top: 1px solid var(--hairline);
+  padding-top: var(--space-2);
+}
+
+.insight-card__action-label {
+  color: var(--signal-amber);
+  font-weight: 600;
 }

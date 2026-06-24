@@ -135,52 +135,32 @@ def compute_breakdown_trend(queryset) -> list:
     ]
 
 
-def compute_failure_heatmap(queryset) -> list:
+def compute_breakdown_streaks(queryset, min_events: int, min_hours: float, max_gap_hours: float,
+                               severity_thresholds: dict) -> list:
     """
-    Returns failure hours bucketed by (day_of_week, hour_of_day_bucket).
-    Hour buckets are 3-hour windows (0-3, 3-6, ... 21-24) covering a full
-    day, computed dynamically rather than assuming any specific shift
-    pattern.
-    """
-    df = _records_to_dataframe(queryset)
-    if df.empty:
-        return []
-    failure_df = df[df["category"].str.lower() == "failure"].copy()
-    if failure_df.empty:
-        return []
-
-    failure_df["day_of_week"] = failure_df["start_time"].apply(lambda d: d.strftime("%A"))
-    failure_df["hour_bucket"] = failure_df["start_time"].apply(lambda d: (d.hour // 3) * 3)
-
-    grouped = failure_df.groupby(["day_of_week", "hour_bucket"])["duration_hours"].sum().reset_index()
-    return [
-        {
-            "day_of_week": row["day_of_week"],
-            "hour_bucket_start": int(row["hour_bucket"]),
-            "hour_bucket_label": f"{int(row['hour_bucket']):02d}:00-{int(row['hour_bucket']) + 3:02d}:00",
-            "failure_hours": round(float(row["duration_hours"]), 2),
-        }
-        for _, row in grouped.iterrows()
-    ]
-
-
-def compute_breakdown_streaks(queryset, min_events: int, min_hours: float, max_gap_hours: float) -> list:
-    """
-    Detects continuous/repeated Failure-category periods.
+    Detects continuous/repeated Failure-category periods across the WHOLE
+    dataset passed in (callers are expected to pass an unfiltered,
+    dataset-scoped queryset - this view is explicitly NOT subject to the
+    dashboard's interactive filters, since a manager needs to see the
+    complete breakdown history regardless of what they're currently
+    looking at elsewhere on the page).
 
     Assumption (documented per spec requirement "Document assumptions"):
     Records are sorted chronologically by (date, start_time). A "streak"
     is a maximal run of Failure-category events where the gap between one
     event's end and the next event's start is <= max_gap_hours. A streak
     qualifies for reporting only if it has >= min_events events AND its
-    total cumulative duration is >= min_hours. Non-failure events do not
-    break a streak by themselves being absent - they simply aren't part of
-    it; however a Failure event separated from the previous Failure event
-    by MORE than max_gap_hours (regardless of what's in between) starts a
+    total cumulative duration is >= min_hours. A Failure event separated
+    from the previous Failure event by MORE than max_gap_hours starts a
     new streak. This treats "continuous or repeated failure periods" as
     failures that recur within a bounded time window of each other, which
     is the practical signal a plant manager cares about (e.g. flapping
     equipment), not strictly back-to-back rows in the dataset.
+
+    Each returned streak also reports a `severity` derived from its
+    average hours of impact per calendar day spanned, classified against
+    configurable thresholds (see SystemConfiguration: severity_*_avg_hours)
+    rather than a hardcoded number.
     """
     df = _records_to_dataframe(queryset)
     if df.empty:
@@ -195,19 +175,35 @@ def compute_breakdown_streaks(queryset, min_events: int, min_hours: float, max_g
     streaks = []
     current_events = []
 
+    def classify_severity(avg_hours_per_day: float) -> str:
+        if avg_hours_per_day >= severity_thresholds["critical"]:
+            return "Critical"
+        if avg_hours_per_day >= severity_thresholds["high"]:
+            return "High"
+        if avg_hours_per_day >= severity_thresholds["medium"]:
+            return "Medium"
+        return "Low"
+
     def flush_streak():
         if not current_events:
             return
         if len(current_events) >= min_events:
             total_hours = sum(e["duration_hours"] for e in current_events)
             if total_hours >= min_hours:
+                start_date = current_events[0]["date"]
+                end_date = current_events[-1]["date"]
+                duration_days = max((end_date - start_date).days + 1, 1)
+                avg_per_day = round(total_hours / duration_days, 2)
                 streaks.append({
-                    "start_date": str(current_events[0]["date"]),
+                    "start_date": str(start_date),
+                    "end_date": str(end_date),
                     "start_time": current_events[0]["start_time"].strftime("%Y-%m-%d %H:%M"),
-                    "end_date": str(current_events[-1]["date"]),
                     "end_time": current_events[-1]["end_time"].strftime("%Y-%m-%d %H:%M"),
+                    "duration_days": duration_days,
                     "event_count": len(current_events),
-                    "total_duration_hours": round(total_hours, 2),
+                    "total_hours": round(total_hours, 2),
+                    "avg_hours_per_day": avg_per_day,
+                    "severity": classify_severity(avg_per_day),
                     "activities": sorted({e["activity_name"] for e in current_events}),
                 })
 
@@ -222,4 +218,71 @@ def compute_breakdown_streaks(queryset, min_events: int, min_hours: float, max_g
         previous_end = row["end_time"]
 
     flush_streak()
+    streaks.sort(key=lambda s: s["total_hours"], reverse=True)
     return streaks
+
+
+def compute_breakdown_streak_timeline(queryset) -> list:
+    """
+    Returns Failure-category hours per day across the WHOLE dataset
+    (no filters), for the streak visualization chart - lets the frontend
+    plot exactly where in the timeline failures (and streaks of them)
+    occurred, independent of whatever the interactive filters are set to
+    elsewhere on the dashboard.
+    """
+    df = _records_to_dataframe(queryset)
+    if df.empty:
+        return []
+    failure_df = df[df["category"].str.lower() == "failure"]
+    if failure_df.empty:
+        return []
+    by_day = failure_df.groupby("date")["duration_hours"].sum().reset_index().sort_values("date")
+    return [
+        {"date": str(row["date"]), "failure_hours": round(float(row["duration_hours"]), 2)}
+        for _, row in by_day.iterrows()
+    ]
+
+
+def compute_data_quality_report(queryset, quality_report) -> dict:
+    """
+    Builds the Data Quality Report panel payload: validity percentage,
+    record counts, aggregate hours/duration stats, category count, and
+    the anomaly breakdown captured during cleaning (zero/negative/outlier
+    hours, duplicates). `quality_report` is the DataQualityReport row
+    produced when this dataset was ingested - this function does not
+    recompute cleaning-time facts, only summarizes them alongside live
+    stats over the currently-stored (already cleaned) records.
+
+    This is intentionally NOT subject to dashboard filters: it reports on
+    the dataset as ingested, which is a fixed historical fact, not a
+    live filtered view.
+    """
+    df = _records_to_dataframe(queryset)
+
+    total_records = quality_report.total_records if quality_report else len(df)
+    final_clean_records = quality_report.final_clean_records if quality_report else len(df)
+    invalid_records = quality_report.invalid_records if quality_report else 0
+    valid_records = final_clean_records - invalid_records if quality_report else len(df)
+    valid_records = max(valid_records, 0)
+
+    validity_pct = round((valid_records / total_records) * 100, 2) if total_records > 0 else 0.0
+
+    total_hours = float(df["duration_hours"].sum()) if not df.empty else 0.0
+    avg_duration = float(df["duration_hours"].mean()) if not df.empty else 0.0
+    category_count = int(df["category"].nunique()) if not df.empty else 0
+
+    return {
+        "data_validity_pct": validity_pct,
+        "total_records": total_records,
+        "valid_records": valid_records,
+        "invalid_records": invalid_records,
+        "total_hours": round(total_hours, 2),
+        "avg_shift_duration_hours": round(avg_duration, 2),
+        "category_count": category_count,
+        "anomalies": {
+            "zero_hours": quality_report.zero_hour_count if quality_report else 0,
+            "negative_hours": quality_report.negative_hour_count if quality_report else 0,
+            "outlier_hours_95th_percentile": quality_report.outlier_hour_count if quality_report else 0,
+            "duplicate_records": quality_report.duplicates_removed if quality_report else 0,
+        },
+    }

@@ -15,8 +15,23 @@
 .dashboard__sidebar {
   width: 280px;
   flex-shrink: 0;
+
   position: sticky;
   top: var(--space-4);
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+
+  height: calc(100vh - (var(--space-4) * 2));
+  overflow-y: auto;
+
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.dashboard__sidebar::-webkit-scrollbar {
+  display: none;
 }
 
 .dashboard__main {
@@ -52,6 +67,16 @@
   text-transform: uppercase;
   color: var(--text-secondary);
   margin: 0;
+}
+
+.dashboard__panel-badge {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--signal-amber);
+  background: var(--signal-amber-glow);
+  border-radius: 10px;
+  padding: 2px 9px;
 }
 
 .dashboard__grid-2 {

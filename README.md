@@ -1,64 +1,181 @@
 # Employee Shift Operational Analytics Dashboard
 
-A full-stack web application that turns raw, messy employee shift logs into an operational picture a plant manager can act on: an efficiency score, downtime breakdown, breakdown-streak detection, a data-quality audit, and auto-generated insights — all driven by configuration stored in the database, never hardcoded into the application logic.
+A full-stack web application that turns raw, messy employee shift logs into an operational picture a plant manager can act on: data quality auditing, operational efficiency scoring, breakdown streak detection, activity breakdowns, and auto-generated insights with recommended actions — all driven by configuration rather than hardcoded business rules, and all runnable against any CSV a user uploads at runtime.
 
-> **New here?** Jump straight to [Quick Start](#3-installation--setup) to get the app running, or [Usage Guide](#9-usage-guide) to see how to use it once it's up.
+This document is written as a self-contained manual: read it top to bottom and you will understand exactly what was built, why each design decision was made, and how to run, test, and extend the project.
 
 ---
 
 ## Table of Contents
 
- 1. [What This Project Does](#1-what-this-project-does)
- 2. [Features](#2-features)
- 3. [Installation & Setup](#3-installation--setup)
- 4. [Technology Stack](#4-technology-stack)
- 5. [Project Structure](#5-project-structure)
- 6. [The Data Pipeline](#6-the-data-pipeline)
- 7. [API Reference](#7-api-reference)
- 8. [Key Design Decisions](#8-key-design-decisions)
- 9. [Usage Guide](#9-usage-guide)
+1.  [Project Summary](#1-project-summary)
+2.  [Features](#2-features)
+3.  [Technology Stack](#3-technology-stack)
+4.  [Project Structure](#4-project-structure)
+5.  [The Data Pipeline](#5-the-data-pipeline)
+6.  [Installation & Setup](#6-installation--setup)
+    - [6.1 Prerequisites](#61-prerequisites)
+    - [6.2 Backend Setup](#62-backend-setup)
+    - [6.3 Frontend Setup](#63-frontend-setup)
+    - [6.4 Running the App](#64-running-the-app)
+7.  [API Reference](#7-api-reference)
+    - [7.1 Filter-Aware Endpoints](#71-filter-aware-endpoints)
+    - [7.2 Whole-Dataset Endpoints](#72-whole-dataset-endpoints)
+    - [7.3 Dataset Management Endpoints](#73-dataset-management-endpoints)
+    - [7.4 Filter Query Parameters](#74-filter-query-parameters)
+8.  [Key Design Decisions](#8-key-design-decisions)
+    - [8.1 No Hardcoding — The Configuration System](#81-no-hardcoding--the-configuration-system)
+    - [8.2 Data Quality & Cleaning Assumptions](#82-data-quality--cleaning-assumptions)
+    - [8.3 Dynamic Dataset Upload](#83-dynamic-dataset-upload)
+    - [8.4 Why Breakdown Streaks & Data Quality Ignore Filters](#84-why-breakdown-streaks--data-quality-ignore-filters)
+    - [8.5 Breakdown Streak Detection Algorithm](#85-breakdown-streak-detection-algorithm)
+    - [8.6 Operational Insights Are Computed, Not Written](#86-operational-insights-are-computed-not-written)
+    - [8.7 Visual Design Direction](#87-visual-design-direction)
+9.  [Usage Guide](#9-usage-guide)
+    - [9.1 Exploring the Default Dataset](#91-exploring-the-default-dataset)
+    - [9.2 Uploading Your Own Dataset](#92-uploading-your-own-dataset)
+    - [9.3 Filtering & Drilling In](#93-filtering--drilling-in)
+    - [9.4 Reading the Breakdown Streaks Panel](#94-reading-the-breakdown-streaks-panel)
+    - [9.5 Reading the Data Quality Report](#95-reading-the-data-quality-report)
+    - [9.6 Reading Operational Insights](#96-reading-operational-insights)
+    - [9.7 Reconfiguring Activities & Thresholds](#97-reconfiguring-activities--thresholds)
 10. [Testing](#10-testing)
-11. [Assumptions Log](#11-assumptions-log)
-12. [Known Limitations](#12-known-limitations)
+11. [Troubleshooting](#11-troubleshooting)
+12. [Known Limitations & Next Steps](#12-known-limitations--next-steps)
 
 ---
 
-## 1. What This Project Does
+## 1. Project Summary
 
-Plant managers receive shift logs (date, start time, end time, hours, and a free-text "reason" — Training, Breakdown, Power Failure, etc.) and need to answer questions like:
+A plant operates in shifts. Every shift, equipment runs, breaks down, gets maintained, or sits idle — and every one of those events gets logged as a row in a spreadsheet: a date, a start time, an end time, a duration, and a reason. Individually those rows are just data entry. Collectively, they answer the questions a manager actually has:
 
-- How efficiently is the shift running, and is that improving?
-- Where is time actually going — productive work vs. failures vs. idle time?
-- Is there a *pattern* of repeated breakdowns, or are failures one-off?
-- How trustworthy is this data — how much of it had to be cleaned or guessed at?
-- What should I actually *do* about any of this?
+- _How efficient were we this period?_
+- _Are breakdowns clustering around a specific time, or are they random?_
+- _Is the source data itself trustworthy, or full of gaps and errors?_
+- _What should I actually do about it?_
 
-This application answers all five, automatically, from whatever shift CSV is loaded — including a CSV the user uploads themselves at runtime, with no code changes or restarts required.
+This project ingests that raw log, cleans it, classifies it against a configurable rulebook (not a hardcoded one), computes the analytics, and presents it through a REST API and a React dashboard — with the ability to swap in a completely different dataset at runtime via upload, with no code changes and no redeployment.
 
 ---
 
 ## 2. Features
 
-- **Dynamic dataset upload.** Drop in any shift CSV from the dashboard sidebar; the app cleans it, classifies its activities, and switches the entire dashboard to that data immediately. The originally bundled dataset is never deleted — you can switch back to it (or any previous upload) with one click.
-- **Operational Efficiency Score**, computed live as `Productive Hours ÷ Total Hours × 100`.
-- **Shift Analysis chart** — a Gantt/timeline visualization (not a bar chart) showing every shift block positioned by date and time-of-day, on a continuous 0–36 hour scale so overnight shifts render without clipping or wrapping.
-- **Activity Distribution** and **Breakdown Trend** charts, both filterable by date range, activity, category, and duration.
-- **Breakdown Streak detection** — finds clusters of failure events that recur within a configurable time window, reports each as a severity- rated incident (Low/Medium/High/Critical), and visualizes exactly where in the timeline they occurred. **This panel always reflects the entire active dataset, deliberately ignoring the dashboard's interactive filters** — breakdown risk is a standing operational fact, not something that should disappear because of an unrelated filter selection.
-- **Data Quality Report** — validity percentage, record counts, and an anomaly breakdown (zero-hour records, negative-hour records, statistical outliers via the 95th percentile, duplicate rows). Also whole-dataset, also filter-independent, for the same reason as above.
-- **Operational Insights** — plant-manager-facing cards (Efficiency Status, Breakdown Risk, Optimization Opportunities, Configuration flags) that **do** respond to filters and to whichever dataset is active. Every number in every insight is computed live; no insight text is a static template.
-- **Zero hardcoding.** Every activity name, its productivity flag, its category, its chart color, and every numeric threshold (streak sensitivity, severity bands, efficiency target) lives in the database, seeded from JSON. New/renamed/unexpected activity names are auto-registered with safe defaults instead of crashing or being dropped.
+- **Dynamic dataset upload** — load the bundled sample dataset by default, or upload any compatible CSV through the dashboard. Every dataset ever ingested is kept, so you can switch back and forth without re-uploading.
+- **Automated data cleaning** — missing values, malformed dates, invalid timestamps, overnight shifts, duration mismatches, and duplicate rows are all detected and repaired (or rejected with a reason), never silently dropped without a trace.
+- **Configurable activity classification** — every activity ("Breakdown", "Training", etc.) is mapped to a productivity flag, a category, and a color through a database table, not application code. Unknown activities in a new dataset are auto-registered rather than crashing the pipeline or being discarded.
+- **Operational Efficiency Score** — productive hours divided by total hours, always computed live from whatever data and filters are active.
+- **Interactive Shift Analysis timeline** — a Gantt-style chart (not a bar chart) showing every shift block across a 0-36 hour axis so overnight shifts render as one continuous block.
+- **Activity Distribution & Breakdown Trend charts** — where the hours actually went, and how failure time moves over the date range.
+- **Breakdown Streaks (whole-dataset view)** — detects clusters of failure events that occur close together in time, classifies their severity, and visualizes exactly where in the timeline they happened — deliberately independent of whatever filters are active elsewhere.
+- **Data Quality Report (whole-dataset view)** — validity percentage, record counts, and an anomaly breakdown (zero-hour records, negative-hour records, statistical outliers, duplicates) for the dataset as it was ingested.
+- **Operational Insights with recommended actions** — every insight card is generated from the live numbers (not pre-written text), each with a severity rating and a concrete suggested action.
+- **Dynamic, combinable filters** — date range, activity reason, category, and duration range, all derived from whatever is actually in the data.
 
 ---
 
-## 3. Installation & Setup
+## 3. Technology Stack
 
-### Prerequisites
+| Layer              | Technology                                                                 |
+| ------------------ | -------------------------------------------------------------------------- |
+| Backend framework  | Django 5 + Django REST Framework                                           |
+| Data processing    | Pandas, NumPy                                                              |
+| Database           | SQLite by default; PostgreSQL via one environment variable                 |
+| Frontend framework | React 19 + Vite                                                            |
+| Charting           | Recharts (pie/area charts) + hand-built SVG (Gantt timeline, streak chart) |
+| Frontend testing   | Vitest + React Testing Library                                             |
+| Backend testing    | Django's built-in TestCase + DRF's APIClient                               |
+
+---
+
+## 4. Project Structure
+
+```
+shift-analytics/
+├── README.md                     This file
+├── backend/
+│   ├── shift_analytics/          Django project (settings, root urls)
+│   ├── config_app/               Configuration tables - the "rulebook"
+│   │   ├── data/                   activity_config.json, system_config.json (seed files)
+│   │   ├── models.py                ActivityConfiguration, SystemConfiguration
+│   │   ├── loader.py                SINGLE access point for all config reads
+│   │   └── management/commands/seed_config.py
+│   ├── shifts/                   Core application logic
+│   │   ├── models.py                Dataset, ShiftRecord, DataQualityReport
+│   │   ├── cleaning.py              Data Quality Module (validation + repair)
+│   │   ├── ingestion.py             Shared ingestion service (CLI + upload API)
+│   │   ├── analytics.py             Analytics Engine (all computed metrics)
+│   │   ├── insights.py              Insight generator (titles/metrics/actions/severity)
+│   │   ├── filters.py               Dynamic query-param filter system
+│   │   ├── views.py / urls.py       REST API
+│   │   ├── tests.py                 Backend test suite
+│   │   └── management/commands/ingest_shifts.py
+│   ├── data/shift_data.csv       Bundled default dataset
+│   └── requirements.txt
+└── frontend/
+    ├── src/
+    │   ├── api/client.js              REST client - every API call goes through here
+    │   ├── hooks/useDashboardData.js  Central data + filter + dataset state
+    │   ├── components/
+    │   │   ├── DatasetPanel.jsx          Upload / switch dataset
+    │   │   ├── FilterPanel.jsx           Dynamic filter controls
+    │   │   ├── KpiCards.jsx              Efficiency score + summary KPIs
+    │   │   ├── ShiftAnalysisChart.jsx    Custom Gantt-style timeline
+    │   │   ├── ActivityLegend.jsx        Auto-updating activity/category legend
+    │   │   ├── ActivityDistributionChart.jsx
+    │   │   ├── BreakdownTrendChart.jsx
+    │   │   ├── BreakdownStreaksPanel.jsx Whole-dataset streak visual + detail cards
+    │   │   ├── DataQualityReportPanel.jsx Whole-dataset quality report
+    │   │   └── InsightPanel.jsx          Insight cards (title/metric/action/severity)
+    │   ├── pages/Dashboard.jsx        Composes everything above
+    │   ├── styles/tokens.css          Design tokens (see Section 8.7)
+    │   └── test/                      Vitest + RTL specs, one file per component
+    └── package.json
+```
+
+---
+
+## 5. The Data Pipeline
+
+Every dataset — whether the bundled default or something you upload — flows through the exact same pipeline:
+
+```
+Raw CSV
+   |
+   v
+Ingestion          (read into a DataFrame)
+   |
+   v
+Validation &       (missing values, malformed dates/timestamps, duration
+Cleaning            mismatches, overnight shifts, duplicates, anomaly counts)
+   |
+   v
+Configuration       (each REASON resolved against ActivityConfiguration;
+Rules                unknown activities auto-registered, never dropped)
+   |
+   v
+Persistence         (stored as a new Dataset + its ShiftRecords; becomes
+                     the active dataset; previous datasets are kept)
+   |
+   v
+Analytics Engine    (efficiency, distribution, trend, streaks, quality report)
+   |
+   v
+REST API  ------->  React Dashboard  ------->  Operational Insights
+```
+
+The CLI command (ingest_shifts) and the dashboard's upload button call the _same_ underlying service function (shifts/ingestion.py), so a dataset loaded at startup and one uploaded by a user mid-session are held to identical standards — there is no "trusted" and "untrusted" code path.
+
+---
+
+## 6. Installation & Setup
+
+### 6.1 Prerequisites
 
 - Python 3.11+
 - Node.js 18+
-- (Optional) PostgreSQL 13+ — SQLite is used by default, zero config needed
+- (Optional) PostgreSQL 13+ if you don't want SQLite
 
-### Backend Setup
+### 6.2 Backend Setup
 
 ```bash
 cd backend
@@ -67,9 +184,9 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-> **If** `pip install` **can't find a matching Django version** (some corporate/regional PyPI mirrors lag behind the public index): `requirements.txt` uses version *ranges* (e.g. `Django>=5.0,<6.0`) specifically so pip can resolve whatever compatible release your mirror actually has. If it still fails, try `pip install -r requirements.txt --index-url https://pypi.org/simple`, or run `pip index versions django` to see what your index offers.
+> **If pip install can't find a matching Django version** (some corporate/regional PyPI mirrors lag behind the public index): requirements.txt uses version _ranges_ (e.g. Django&gt;=5.0,&lt;6.0) specifically so pip can resolve whatever compatible release your mirror actually has. If it still fails, try pip install -r requirements.txt --index-url https://pypi.org/simple to bypass a stale mirror.
 
-Set up the database, seed the configuration tables, and load the bundled dataset:
+Set up the database and load the bundled dataset:
 
 ```bash
 python manage.py migrate
@@ -83,265 +200,245 @@ python manage.py ingest_shifts     # cleans and loads data/shift_data.csv as the
 python manage.py createsuperuser
 ```
 
-Start the API server:
+Then visit http://localhost:8000/admin/.
+
+**Using PostgreSQL instead of SQLite:**
 
 ```bash
-python manage.py runserver 8000
+export DATABASE_URL="postgres://myuser:mypassword@localhost:5432/shift_analytics"
 ```
 
-### Frontend Setup
+The app detects this and switches the Django database engine automatically — no code changes needed.
+
+### 6.3 Frontend Setup
 
 ```bash
 cd frontend
 npm install
 cp .env.example .env
+```
+
+.env controls where the frontend looks for the API:
+
+```
+VITE_API_BASE_URL=http://localhost:8000/api
+```
+
+### 6.4 Running the App
+
+**Terminal 1 — backend:**
+
+```bash
+cd backend
+source venv/bin/activate
+python manage.py runserver 8000
+```
+
+**Terminal 2 — frontend:**
+
+```bash
+cd frontend
 npm run dev
 ```
 
-Open `http://localhost:5173`. The dashboard talks to `http://localhost:8000/api` by default (configurable via `VITE_API_BASE_URL`in `.env`).
+Open http://localhost:5173. The dashboard talks live to http://localhost:8000/api.
 
-### Using a Different Dataset From the Start
+**Production build (frontend):**
 
-Two ways, both equally valid:
-
-1. **From the UI** (recommended): once the app is running, use the **Upload new CSV** button in the sidebar. See [Usage Guide §1](#1-data-upload).
-2. **From the command line**, before ever opening the dashboard:
-
-   ```bash
-   export DATASET_PATH=/path/to/your_other_shift_data.csv
-   python manage.py ingest_shifts --reset
-   ```
-
----
-
-## 4. Technology Stack
-
-| Layer | Choice | Why |
-| --- | --- | --- |
-| Backend framework | Django + Django REST Framework | Batteries-included ORM, admin, and migrations; DRF gives a clean `@api_view` surface for a small, well-defined API |
-| Database | SQLite (default) / PostgreSQL (optional) | Zero-config local dev; swappable to Postgres via one `DATABASE_URL` env var for production, no code changes |
-| Data processing | Pandas + NumPy | Vectorized cleaning, percentile calculations (outlier detection), groupby aggregations for all chart data |
-| Frontend framework | React 19 + Vite | Fast dev server, component-based architecture as required |
-| Charting | Recharts (pie, area) + hand-built SVG (Gantt timeline, streak chart) | Recharts has no first-class Gantt chart type, so the two most bespoke visualizations are custom SVG — documented as a deliberate exception |
-| Routing | React Router | Future-proofs the single-page dashboard for additional routes |
-| Testing | Django `TestCase` (backend) / Vitest + React Testing Library (frontend) | Standard, well-supported tooling for each stack |
-
----
-
-## 5. Project Structure
-
+```bash
+npm run build && npm run preview
 ```
-backend/
-├── shift_analytics/          Django project root (settings, root urls)
-├── config_app/                Configuration: WHAT activities mean
-│   ├── data/                    activity_config.json, system_config.json (seed files)
-│   ├── models.py                ActivityConfiguration, SystemConfiguration
-│   ├── loader.py                single access point for all config reads
-│   └── management/commands/seed_config.py
-├── shifts/                    Domain logic: WHAT happened and what it implies
-│   ├── models.py                Dataset, ShiftRecord, DataQualityReport
-│   ├── cleaning.py              Data Quality Module - validation & repair
-│   ├── ingestion.py             Shared ingest pipeline (CLI command + upload API both use this)
-│   ├── analytics.py             Analytics Engine - all computed metrics
-│   ├── insights.py              Insight-card generator
-│   ├── filters.py               Dynamic query-param filter system
-│   ├── views.py / urls.py       REST API
-│   ├── tests.py                 Backend test suite
-│   └── management/commands/ingest_shifts.py
-└── data/shift_data.csv        Bundled default dataset
-
-frontend/
-└── src/
-    ├── api/client.js              REST client - every API call goes through here
-    ├── hooks/useDashboardData.js  Central data + filter + dataset state
-    ├── components/
-    │   ├── DatasetPanel.jsx          Upload / switch dataset
-    │   ├── FilterPanel.jsx           Dynamic filters (date, reason, category, duration)
-    │   ├── KpiCards.jsx               Efficiency score + headline KPIs
-    │   ├── ShiftAnalysisChart.jsx     Custom Gantt-style timeline (the primary chart)
-    │   ├── ActivityLegend.jsx        Auto-updating legend from live config
-    │   ├── ActivityDistributionChart.jsx
-    │   ├── BreakdownTrendChart.jsx
-    │   ├── BreakdownStreaksPanel.jsx  Whole-dataset streak visual + detail cards
-    │   ├── DataQualityReportPanel.jsx Whole-dataset quality/anomaly report
-    │   └── InsightPanel.jsx          Severity-rated, data-derived insight cards
-    ├── pages/Dashboard.jsx        Composes everything above
-    └── test/                      Vitest + React Testing Library specs
-```
-
-**Why this split:** `config_app` owns *what activities mean* (is "Breakdown" productive? what color is it? what category does it roll up into?). `shifts` owns *what happened and what it implies* (the actual records, and every metric derived from them). Nothing in `shifts` ever needs to change when activities are renamed, merged, or invented - it always asks `config_app.loader` for the answer, and unknown activities are auto-registered rather than rejected.
-
----
-
-## 6. The Data Pipeline
-
-```
-  Raw CSV (bundled or uploaded)
-        |
-        v
-  Ingestion           shifts/ingestion.py  - reads the CSV into a DataFrame
-        |
-        v
-  Validation &        shifts/cleaning.py   - detects missing values, bad
-  Cleaning                                    timestamps, duration mismatches,
-        |                                     duplicates, statistical anomalies
-        v
-  Configuration        config_app/loader.py - every activity name resolved
-  Rules                                        against the DB; unknowns auto-
-        |                                       registered with safe defaults
-        v
-  Database             A new Dataset row is created; ShiftRecords are bulk-
-  Persistence                                  inserted under it; a
-                                                 DataQualityReport is logged
-        |
-        v
-  Analytics Engine     shifts/analytics.py  - efficiency score, distributions,
-                                                trend lines, streak detection
-        |
-        v
-  REST API             shifts/views.py      - JSON endpoints, some filter-aware,
-                                                some intentionally whole-dataset
-        |
-        v
-  React Dashboard       frontend/src        - charts, filters, upload UI
-        |
-        v
-  Operational Insights  shifts/insights.py  - severity-rated, data-derived
-                                                recommendations
-```
-
-Both the bundled dataset and a user's uploaded CSV travel through **exactly this same pipeline** — there is no separate "demo data" code path. See `backend/shifts/ingestion.py`: the management command and the upload API endpoint both call `ingest_dataframe()`.
 
 ---
 
 ## 7. API Reference
 
-Base path: `/api`.
+Base path: /api.
 
-### Filter-Aware Endpoints
+### 7.1 Filter-Aware Endpoints
 
-These respect the optional query parameters below and reflect whatever the dashboard's filter panel is currently set to.
+These respect the query parameters described in [Section 7.4](#74-filter-query-parameters)and always operate on the **currently active dataset**.
 
-| Endpoint | Method | Description |
-| --- | --- | --- |
-| `/dashboard-summary` | GET | Total/productive/downtime hours, efficiency score, record count, date range |
-| `/shift-analysis` | GET | Chart-ready blocks for the Gantt timeline |
-| `/activity-distribution` | GET | Hours & % per activity |
-| `/breakdown-trend` | GET | Failure-category hours per day |
-| `/insights` | GET | Auto-generated, severity-rated insight cards |
-| `/filter-options` | GET | Available reasons, categories, date/duration bounds, full activity config - for the *active* dataset |
+| Endpoint               | Method | Returns                                                                             |
+| ---------------------- | ------ | ----------------------------------------------------------------------------------- |
+| /dashboard-summary     | GET    | Total hours, productive hours, downtime, efficiency score, record count, date range |
+| /shift-analysis        | GET    | Chart-ready blocks for the Gantt timeline                                           |
+| /activity-distribution | GET    | Hours and percentage per activity                                                   |
+| /breakdown-trend       | GET    | Failure-category hours per day                                                      |
+| /insights              | GET    | Auto-generated insight cards                                                        |
+| /filter-options        | GET    | Available reasons, categories, date/duration bounds, full activity config list      |
 
-**Filter query parameters** (all optional, combinable):
+### 7.2 Whole-Dataset Endpoints
 
-| Param | Format | Example |
-| --- | --- | --- |
-| `date_from`, `date_to` | `YYYY-MM-DD` | `?date_from=2025-10-01&date_to=2025-10-10` |
-| `reason` | comma-separated activity names | `?reason=Breakdown,Power Failure` |
-| `category` | comma-separated category names | `?category=Failure` |
-| `min_duration`, `max_duration` | hours (float) | `?min_duration=1&max_duration=5` |
+These **ignore all filter query parameters by design** (see [Section 8.4](#84-why-breakdown-streaks--data-quality-ignore-filters)) and always summarize the entire active dataset.
 
-### Whole-Dataset Endpoints
+| Endpoint             | Method | Returns                                                                            |
+| -------------------- | ------ | ---------------------------------------------------------------------------------- |
+| /breakdown-streaks   | GET    | Detected streaks, a day-by-day failure timeline, and the thresholds used           |
+| /data-quality-report | GET    | Validity percentage, record counts, hours stats, category count, anomaly breakdown |
 
-These **ignore all filter query parameters by design** — they always reflect the complete active dataset.
+### 7.3 Dataset Management Endpoints
 
-| Endpoint | Method | Description |
-| --- | --- | --- |
-| `/breakdown-streaks` | GET | Detected streaks (with severity), plus a full failure-hours timeline for visualization |
-| `/data-quality-report` | GET | Validity %, record counts, aggregate stats, anomaly breakdown |
+| Endpoint                      | Method | Description                                                                                                                       |
+| ----------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| /datasets                     | GET    | Lists every dataset ever ingested (bundled + uploads), most recent first                                                          |
+| /datasets/upload              | POST   | Multipart upload, field name "file" (.csv only). Cleans, ingests, and **activates** the new dataset. Returns the cleaning report. |
+| /datasets/&lt;id&gt;/activate | POST   | Switches the active dataset back to a previously ingested one                                                                     |
 
-### Dataset Management
+Example upload via curl:
 
-| Endpoint | Method | Description |
-| --- | --- | --- |
-| `/datasets` | GET | Lists every dataset ever ingested (bundled default + uploads), newest first |
-| `/datasets/upload` | POST (multipart, field `file`) | Uploads a CSV, runs it through the full pipeline, activates it |
-| `/datasets/<id>/activate` | POST | Switches the active dataset to a previously ingested one |
-
-Example:
-
+```bash
+curl -F "file=@my_shift_data.csv" http://localhost:8000/api/datasets/upload
 ```
-GET /api/dashboard-summary?category=Failure&date_from=2025-10-01
-POST /api/datasets/upload   (multipart/form-data, field name "file")
-POST /api/datasets/3/activate
-```
+
+### 7.4 Filter Query Parameters
+
+All optional, combinable, used only by the filter-aware endpoints above:
+
+| Param                      | Format                         | Example                                  |
+| -------------------------- | ------------------------------ | ---------------------------------------- |
+| date_from, date_to         | YYYY-MM-DD                     | ?date_from=2025-10-01&date_to=2025-10-10 |
+| reason                     | comma-separated activity names | ?reason=Breakdown,Power Failure          |
+| category                   | comma-separated category names | ?category=Failure                        |
+| min_duration, max_duration | hours (float)                  | ?min_duration=1&max_duration=5           |
 
 ---
 
 ## 8. Key Design Decisions
 
-### 8.1 No Hardcoding — Enforced Structurally, Not Just By Convention
+This section explains the _why_ behind the implementation, not just the _what_ — the reasoning a reviewer would want to see.
 
-Every activity name, productivity flag, category, and color lives in `ActivityConfiguration` (DB table, seeded from `activity_config.json`). Every numeric threshold (breakdown streak sensitivity, severity bands, efficiency target) lives in `SystemConfiguration` (seeded from `system_config.json`). All reads go through `config_app/loader.py` — there is exactly one chokepoint between "a string from the dataset" and "a business decision." Application code never contains `if activity == "Breakdown"`.
+### 8.1 No Hardcoding — The Configuration System
 
-**Unknown activities are auto-registered, not rejected.** If a dataset contains an activity name never seen before, it's inserted into `ActivityConfiguration` with safe defaults (`productive=False, category="Uncategorized"`) and flagged `is_auto_registered=True` so a manager can see it in the legend (tagged `auto`) and reclassify it later — the dashboard keeps working immediately either way.
+The project brief's central constraint was: **no activity name, threshold, or business rule may be hardcoded into application logic.** This is enforced architecturally, not just by convention:
 
-### 8.2 Dynamic Dataset Upload, Not Just a Static File
+- ActivityConfiguration (one row per activity name) holds productive_status, category, and display_color. Seeded from config_app/data/activity_config.json, but editable via Django admin or the database directly.
+- SystemConfiguration is a generic key/value store for every numeric threshold the app uses (breakdown streak minimums, severity cutoffs, efficiency target, etc.), seeded from system_config.json.
+- **All reads go through config_app/loader.py** — get_or_register_activity() and get_setting_float()/get_setting_int(). No other module imports these models directly for read access. This means there is exactly one chokepoint between "a string from the dataset" and "a business decision," and changing a rule never requires touching Python code.
+- **Unknown activities are never dropped.** If an uploaded dataset contains a REASON value the system hasn't seen before, it's auto-registered with safe defaults (productive=False, category="Uncategorized") and flagged in the UI legend with an "auto" badge, so a manager can classify it properly rather than losing the data or crashing the pipeline.
 
-Rather than the app being tied to one CSV on disk, `Dataset` is a first-class database model. Each upload (or the bundled CSV) becomes its own `Dataset` row; exactly one is `is_active` at a time, and that's what every endpoint serves. Uploading a new file **does not delete previous data** — it's still in the database, switchable back to with one click. This is what makes "upload new data, but keep the default available" work without any special-casing.
+### 8.2 Data Quality & Cleaning Assumptions
 
-### 8.3 Why Breakdown Streaks and Data Quality Are Filter-Independent
+Real shift logs are messy. The cleaning pipeline (shifts/cleaning.py) makes these explicit, documented decisions:
 
-Every other panel responds to the filter bar, because filtering is how a manager narrows their *view*. But breakdown risk and data trustworthiness are properties of the *dataset itself*, not of a view — if a manager filters down to "show me only Training records this week," the breakdown streak panel showing "0 incidents" would be misleading, not insightful. These two panels are deliberately wired to a separate, unfiltered query path (`_active_dataset_queryset()` in `views.py`, with no `apply_filters()`call) so they always answer "what's the real state of this plant," full stop.
+1. **A row is dropped only if unrecoverable** — no parseable date AND no way to establish both a start and end time. Everything else is repaired.
+2. **Missing START or END (not both)** is derived from the other timestamp plus or minus HOURS, when HOURS is present and positive.
+3. **Malformed DAY_DATE** (e.g. an impossible month/day) is derived from the valid START timestamp instead of dropping the row.
+4. **Unparseable timestamp strings** are treated as missing, then handled by rule 2.
+5. **END before START** is treated as an overnight shift and rolled forward a day — _unless_ that implies more than 16 continuous hours, in which case the record is rejected as implausible.
+6. **HOURS vs. END minus START mismatches** (including negative, zero, or non-numeric HOURS) are recalculated from the timestamps, since timestamps are the more granular, less error-prone source. A 3-minute tolerance absorbs rounding before triggering a recalculation.
+7. **Missing REASON** becomes "Unspecified" rather than being dropped, so the hours aren't lost from totals.
+8. **Exact duplicates** (same date, start, end, reason) are removed, keeping the first occurrence.
 
-### 8.4 Breakdown Streak Detection Algorithm
+Separately from these _repairs_, the pipeline also counts **anomalies**purely for reporting (these don't change what gets kept, only what gets flagged in the Data Quality Report):
 
-A "streak" is a maximal run of Failure-category events where the gap between one event's end and the next failure event's start is **≤** `max_gap_hours` (default 6h). This treats "recurring failures" as failures that cluster within a practical time window — not strictly back-to-back CSV rows — since that's the signal a plant manager actually cares about (e.g. flapping equipment across a shift). A streak is only *reported* if it has **≥** `minimum_events` (default 2) and **≥** `minimum_hours` (default 4h) of cumulative impact, to avoid flagging two unrelated failures hours apart as a "streak." Each qualifying streak is then classified by **average impact hours per calendar day spanned**against configurable severity bands:
+- **Zero-hour records** — the raw HOURS value was exactly 0.
+- **Negative-hour records** — the raw HOURS value was negative (counted before correction, since this describes how messy the _source_ data was).
+- **Statistical outliers** — any cleaned record at or above the 95th percentile of cleaned shift durations.
+- **Duplicate records** — same count as cleaning's duplicate removal.
 
-| Severity | Avg hours/day |
-| --- | --- |
-| Critical | ≥ 8h |
-| High | ≥ 5h |
-| Medium | ≥ 2h |
-| Low | below 2h |
+Every run's full decision log and summary counts are persisted in a DataQualityReport row, so cleaning behavior is auditable, not a black box.
 
-All five numbers above are `SystemConfiguration` rows, not constants in the code — tune them per plant without touching a single line.
+### 8.3 Dynamic Dataset Upload
 
-### 8.5 Data Quality Anomaly Detection
+The dashboard isn't locked to the bundled CSV. A Dataset model tracks every file ever ingested; exactly one is is_active at a time, and the entire API serves data from whichever one is active. Uploading a new CSV:
 
-During cleaning, four anomaly counters are tracked independently of whatever repair action was taken on a row:
+1. Runs through the identical cleaning and configuration pipeline as the default dataset (same ingest_dataframe() function).
+2. Is stored as a **new** Dataset row — the previous one is deactivated, not deleted, so you can switch back via "Switch" in the dataset panel or POST /api/datasets/&lt;id&gt;/activate.
+3. Immediately becomes what every chart, KPI, and report on the dashboard reflects.
 
-- **Zero hours** — the raw `HOURS` value was exactly 0.
-- **Negative hours** — the raw `HOURS` value was negative.
-- **Outliers (95th percentile)** — after cleaning, any record whose duration sits at or above the 95th percentile of all cleaned durations.
-- **Duplicates** — exact repeats (same date, start, end, reason), removed during cleaning.
+This means the bundled dataset is genuinely just the _default_, not a special case in the code.
 
-These are diagnostic facts about how messy the *source* data was, reported separately from the cleaning pipeline's repair actions — so a manager can see both "how dirty was this CSV" and "what did the system do about it."
+### 8.4 Why Breakdown Streaks & Data Quality Ignore Filters
 
-### 8.6 Operational Insights Are Computed, Not Templated
+Every other panel on the dashboard respects the active filters (date range, activity, category, duration) — that's the point of a filter panel. **Breakdown Streaks and the Data Quality Report deliberately do not.** The reasoning:
 
-Every insight card (`Operational Efficiency Status`, `Breakdown Risk Assessment`, `Optimization Opportunity`, `Unclassified Activity Detected`) interpolates real numbers from the analytics engine for whatever filtered view is currently active. Severity badges and "Action:" recommendations are derived from those same numbers (e.g. severity escalates as efficiency drops below threshold, or as an active streak's severity increases) — they are not fixed strings keyed off a category. Change the filters or upload a different dataset, and every word and number on this panel changes with it.
+- **Breakdown risk is a standing operational fact.** If a manager filters down to look at "Training" activities only, the breakdown streak that happened last Tuesday didn't stop happening — showing it as "no streaks" because of an unrelated filter would be actively misleading. This panel always answers "where in the _entire_ dataset did breakdowns cluster," independent of whatever else is being explored elsewhere.
+- **Data quality is a historical fact about the dataset as ingested**, not a property of any particular filtered slice. Asking "is this data trustworthy" shouldn't have a different answer depending on which date range you happen to have selected.
 
-### 8.7 Visual Identity
+Both endpoints are implemented to literally ignore the filter query parameters at the view layer (\_active_dataset_queryset() vs. \_base_queryset(request) in shifts/views.py), and this behavior is covered by tests (test_breakdown_streaks_endpoint_ignores_filters, test_data_quality_report_endpoint_ignores_filters).
 
-The UI is built as an industrial control-room / HMI panel rather than a generic SaaS dashboard template: graphite panel surfaces, an amber signal-light accent, hairline dividers, near-zero border radius, a condensed display face (Oswald) paired with a tabular monospace (IBM Plex Mono) so every column of numbers aligns. All data-series colors come from the API's `display_color` field — never hardcoded in frontend CSS — keeping one color system shared between backend config and frontend rendering.
+### 8.5 Breakdown Streak Detection Algorithm
+
+A "breakdown streak" is not strictly consecutive rows in the dataset — real logs interleave failures with productive/idle time, and a manager cares about _recurring_ failures within a practical window, not just back-to-back rows. The algorithm (shifts/analytics.compute_breakdown_streaks):
+
+1. Filters to Failure-category events only (by **category**, so it generalizes to any activity tagged Failure, known or auto-registered).
+2. Sorts chronologically by (date, start_time).
+3. Groups events into a streak as long as the gap between one event's end and the next failure event's start is **at most max_gap_hours** (default 6h). A larger gap ends the current streak and starts a new one.
+4. A streak is only _reported_ if it has **at least minimum_events** (default 2) AND **at least minimum_hours** cumulative duration (default 4h).
+5. Each reported streak is classified into a **severity** (Low / Medium / High / Critical) based on its average failure-hours per calendar day spanned, against configurable thresholds (streak_severity_critical_avg_hours, etc. in SystemConfiguration).
+
+All five thresholds live in SystemConfiguration and can be tuned per plant without a code change. Against the bundled sample dataset, these defaults correctly surface two real streaks — for example, three failure events on a single day totalling 9.1 hours (Critical severity) — rather than either missing them or over-flagging noise.
+
+### 8.6 Operational Insights Are Computed, Not Written
+
+shifts/insights.py never returns a fixed sentence. Every insight card has the shape:
+
+```json
+{
+  "title": "Operational Efficiency Status",
+  "metric": "77.13%",
+  "text": "Current operational efficiency is 77.13% (good). Productive hours: 99.5 / 129.0 total hours.",
+  "action": "Focus on reducing minor breakdowns and optimizing shift schedules.",
+  "severity": "Medium"
+}
+```
+
+Every number in text, metric, and the severity classification is pulled live from the analytics engine for whatever data and filters are currently active — change the dataset, change the filters, and the wording, the numbers, and the severities all change with it. This is verified by a test (test_insights_are_generated_from_data_and_include_severity) that asserts every insight's text contains at least one digit, which would fail immediately if a card were ever hardcoded.
+
+Insight cards currently generated:
+
+- **Operational Efficiency Status** — efficiency percentage vs. the configurable target, with a tailored action depending on whether it's met.
+- **Breakdown Risk Assessment** — references the active breakdown streak (if any) plus total failure incident counts, with an action naming the actual leading failure activity.
+- **Optimization Opportunity** — the largest non-failure, non-productive time sink (e.g. Logistics, Idle), so managers see where else time leaks.
+- **Unclassified Activity Detected** — flags any auto-registered/ Uncategorized activity so it gets properly classified.
+
+### 8.7 Visual Design Direction
+
+The UI is built as an industrial control-room / HMI panel rather than a generic SaaS dashboard template: graphite panel surfaces, an amber signal-light accent, hairline dividers, near-zero border radius, a condensed display face (Oswald) for headings, and a tabular monospace (IBM Plex Mono) for every number so columns of hours/percentages align. All data-series colors (activity categories) come from the API's display_color field, never frontend CSS — one color system shared between backend configuration and frontend rendering.
 
 ---
 
 ## 9. Usage Guide
 
-### 1. Data Upload
+### 9.1 Exploring the Default Dataset
 
-On load, the dashboard shows the **bundled default dataset**(`shift_data.csv`) automatically — no setup required. To analyze your own data:
+On first load, the dashboard shows the bundled shift_data.csv — no setup required beyond the install steps in [Section 6](#6-installation--setup). The **Dataset panel** (top of the left sidebar) confirms which dataset is active and how many records it contains.
 
-1. Click **Upload new CSV** in the sidebar's Dataset panel.
-2. Select a CSV with columns `DAY_DATE, START, END, HOURS, REASON`.
-3. The app cleans it, classifies its activities (auto-registering any new ones), and switches the **entire dashboard** to that data within seconds.
-4. Your previous dataset (including the original default) is preserved — it appears under **Previously loaded**, with a **Switch** button to revert at any time.
+### 9.2 Uploading Your Own Dataset
 
-### 2. Filter & Analyze
+1. Click **Upload new CSV** in the Dataset panel.
+2. Choose a CSV with the columns DAY_DATE, START, END, HOURS, REASON (extra/differently-ordered columns and unfamiliar REASON values are both handled gracefully — see [Section 8.1](#81-no-hardcoding--the-configuration-system)and [Section 8.2](#82-data-quality--cleaning-assumptions)).
+3. The dashboard immediately switches to the new dataset and shows how many records were cleaned (e.g. "Loaded 'new.csv' — 47 clean records.").
+4. To go back to a previous dataset, scroll to **Previously loaded** in the Dataset panel and click **Switch** next to it. Nothing is ever deleted by uploading something new.
 
-Use the **Filters** panel to narrow by date range, activity reason, category, or duration. The KPI cards, Shift Analysis chart, Activity Distribution, Breakdown Trend, and Operational Insights all update live. (Breakdown Streaks and the Data Quality Report intentionally do **not** change — see §8.3 above.)
+### 9.3 Filtering & Drilling In
 
-### 3. View Insights
+Use the **Filters** panel to narrow the KPI cards, Shift Analysis chart, Activity Distribution, Breakdown Trend, and Operational Insights to a date range, specific activities, categories, or duration range. Multiple filters combine (AND logic). Click **Clear all filters** to reset.
 
-Scroll to **Operational Insights** for plant-manager-facing recommendations, each with a severity badge and a concrete next step. These respond to both your current filters and whichever dataset is active.
+> Breakdown Streaks and the Data Quality Report panels do **not** change when you filter — see [Section 8.4](#84-why-breakdown-streaks--data-quality-ignore-filters)for why that's intentional, not a bug.
 
-### 4. Investigate Breakdown Streaks
+### 9.4 Reading the Breakdown Streaks Panel
 
-The **Breakdown Streaks** panel shows a timeline bar chart of failure hours across the whole dataset, with detected streak periods shaded. Click a streak's tab (labeled by start date and severity) to see its full detail card: start/end date, duration in days, total hours, average hours/day, severity, and which activities were involved.
+The bar chart shows failure hours per day across the _entire_ active dataset; days that fall inside a detected streak are highlighted with a red background band. Click a date tab below the chart to see that streak's full detail card: Start Date, End Date, Duration (Days), Total Hours, Avg/Day, Severity, and which activities were involved.
 
-### 5. Audit Data Quality
+### 9.5 Reading the Data Quality Report
 
-The **Data Quality Report** panel shows the dataset's validity percentage, record counts, aggregate stats, and a breakdown of detected anomalies (zero-hour records, negative-hour records, statistical outliers, duplicates) — a quick gut-check on how trustworthy the loaded data is.
+- **Data Validity** — the headline percentage and gauge bar.
+- **Stat grid** — Total/Valid/Invalid Records, Total Hours, Avg Shift Duration, and how many distinct Categories exist in the data.
+- **Anomalies Detected** — a checklist of zero-hour records, negative-hour records, statistical outliers (95th+ percentile), and duplicate records found during cleaning.
+
+### 9.6 Reading Operational Insights
+
+Each card has a title, a large headline metric, an explanatory sentence, a colored severity badge (Low/Medium/High/Critical), and a suggested **Action** — read the Action line first if you're short on time; it's the one-sentence "what to actually do" for that card.
+
+### 9.7 Reconfiguring Activities & Thresholds
+
+Open http://localhost:8000/admin/ (requires createsuperuser, see [Section 6.2](#62-backend-setup)) to:
+
+- Edit any ActivityConfiguration row — change its category, productivity flag, or color, including ones that were auto-registered from an upload.
+- Edit any SystemConfiguration row — tune breakdown streak thresholds, severity cutoffs, or the efficiency target percentage.
+
+Changes take effect on the next API request — no restart needed.
 
 ---

@@ -1,6 +1,12 @@
 from rest_framework import serializers
-from .models import ShiftRecord, DataQualityReport
+from .models import ShiftRecord, DataQualityReport, Dataset
 from config_app.models import ActivityConfiguration
+
+
+class DatasetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Dataset
+        fields = ["id", "name", "source", "is_active", "uploaded_at", "row_count"]
 
 
 class ActivityConfigurationSerializer(serializers.ModelSerializer):

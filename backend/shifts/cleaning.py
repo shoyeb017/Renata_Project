@@ -27,6 +27,14 @@ Design note on assumptions (also documented in README):
     dropped as invalid.
   - Exact duplicate rows (same date, start, end, reason) are removed,
     keeping the first occurrence.
+  - Data-quality "anomaly" counters (zero hours, negative hours, outliers,
+    duplicates) reported alongside the cleaning report are diagnostic
+    counts, not cleaning actions: zero/negative-hour counts reflect the
+    RAW HOURS value as supplied (even though the row itself gets repaired
+    and kept), and outliers are flagged as any cleaned record at or above
+    the 95th percentile of cleaned shift durations. These exist so a
+    manager can see how messy the source data was, separately from how
+    the pipeline chose to fix it.
 """
 import hashlib
 from dataclasses import dataclass, field
@@ -47,6 +55,9 @@ class CleaningReport:
     missing_values_handled: int = 0
     duration_mismatches_fixed: int = 0
     final_clean_records: int = 0
+    zero_hour_count: int = 0
+    negative_hour_count: int = 0
+    outlier_hour_count: int = 0
     issues: list = field(default_factory=list)
 
     def log(self, row_index, message):
@@ -60,6 +71,9 @@ class CleaningReport:
             "missing_values_handled": self.missing_values_handled,
             "duration_mismatches_fixed": self.duration_mismatches_fixed,
             "final_clean_records": self.final_clean_records,
+            "zero_hour_count": self.zero_hour_count,
+            "negative_hour_count": self.negative_hour_count,
+            "outlier_hour_count": self.outlier_hour_count,
         }
 
 
@@ -140,6 +154,14 @@ def clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, CleaningReport]:
         hours = _parse_hours(raw.get("HOURS"))
         date_val = _parse_date(raw.get("DAY_DATE"))
 
+        # Anomaly counters reflect the RAW, as-supplied HOURS value (before
+        # any correction below), since these are reported as data-quality
+        # findings about the source data itself.
+        if hours is not None and hours == 0:
+            report.zero_hour_count += 1
+        if hours is not None and hours < 0:
+            report.negative_hour_count += 1
+
         if start_dt is None:
             missing_in_row = True
             report.log(idx, "Missing/invalid START timestamp.")
@@ -208,4 +230,14 @@ def clean_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, CleaningReport]:
 
     report.final_clean_records = len(cleaned_rows)
     clean_df = pd.DataFrame(cleaned_rows)
+
+    # Outlier detection: any cleaned record whose duration sits at or above
+    # the 95th percentile of all cleaned durations is flagged as a
+    # statistical outlier. This is computed AFTER cleaning so it reflects
+    # genuinely unusual shift lengths, not artifacts of bad source data
+    # (which cleaning has already corrected).
+    if not clean_df.empty and len(clean_df) >= 2:
+        p95 = clean_df["duration_hours"].quantile(0.95)
+        report.outlier_hour_count = int((clean_df["duration_hours"] >= p95).sum())
+
     return clean_df, report

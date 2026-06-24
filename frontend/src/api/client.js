@@ -21,6 +21,23 @@ async function get(path, params = {}) {
   return response.json();
 }
 
+async function post(path, { json, formData } = {}) {
+  const url = `${API_BASE_URL}${path}`;
+  const options = { method: "POST" };
+  if (formData) {
+    options.body = formData;
+  } else if (json) {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(json);
+  }
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `API request failed: ${response.status} ${response.statusText}`);
+  }
+  return data;
+}
+
 export function buildFilterParams(filters) {
   const params = {};
   if (filters.dateFrom) params.date_from = filters.dateFrom;
@@ -33,12 +50,24 @@ export function buildFilterParams(filters) {
 }
 
 export const api = {
+  // Filter-aware (respect dashboard filters)
   getDashboardSummary: (filters) => get("/dashboard-summary", buildFilterParams(filters)),
   getShiftAnalysis: (filters) => get("/shift-analysis", buildFilterParams(filters)),
   getActivityDistribution: (filters) => get("/activity-distribution", buildFilterParams(filters)),
   getBreakdownTrend: (filters) => get("/breakdown-trend", buildFilterParams(filters)),
-  getFailureHeatmap: (filters) => get("/failure-heatmap", buildFilterParams(filters)),
-  getBreakdownStreaks: (filters) => get("/breakdown-streaks", buildFilterParams(filters)),
   getInsights: (filters) => get("/insights", buildFilterParams(filters)),
   getFilterOptions: () => get("/filter-options"),
+
+  // Whole-dataset (NOT filter-aware, by design)
+  getBreakdownStreaks: () => get("/breakdown-streaks"),
+  getDataQualityReport: () => get("/data-quality-report"),
+
+  // Dataset management
+  listDatasets: () => get("/datasets"),
+  uploadDataset: (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return post("/datasets/upload", { formData });
+  },
+  activateDataset: (datasetId) => post(`/datasets/${datasetId}/activate`),
 };
