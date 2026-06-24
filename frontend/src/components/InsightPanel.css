@@ -1,0 +1,37 @@
+.insight-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.insight-item {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.insight-item__index {
+  color: var(--signal-amber);
+  font-size: 12px;
+  padding-top: 2px;
+  flex-shrink: 0;
+}
+
+.insight-item__category {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 2px;
+}
+
+.insight-item__text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}

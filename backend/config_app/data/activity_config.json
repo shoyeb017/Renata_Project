@@ -1,0 +1,16 @@
+{
+  "activities": [
+    { "name": "Training",          "productive": true,  "category": "Productive",    "display_color": "#2E8B7E" },
+    { "name": "Setup",              "productive": true,  "category": "Productive",    "display_color": "#3AA0A0" },
+    { "name": "Quality Check",      "productive": true,  "category": "Productive",    "display_color": "#4CAF8F" },
+    { "name": "Maintenance",        "productive": false, "category": "Planned Downtime", "display_color": "#C9A227" },
+    { "name": "Cleaning",           "productive": false, "category": "Planned Downtime", "display_color": "#D9B44A" },
+    { "name": "Breakdown",          "productive": false, "category": "Failure",       "display_color": "#C44536" },
+    { "name": "Power Failure",      "productive": false, "category": "Failure",       "display_color": "#A8322A" },
+    { "name": "Unknown Failure",    "productive": false, "category": "Failure",       "display_color": "#8C2F39" },
+    { "name": "Machine Jam",        "productive": false, "category": "Failure",       "display_color": "#B5495B" },
+    { "name": "Material Shortage",  "productive": false, "category": "Logistics",     "display_color": "#7B6888" },
+    { "name": "Idle",               "productive": false, "category": "Idle",          "display_color": "#9AA0A6" },
+    { "name": "Other",              "productive": false, "category": "Uncategorized", "display_color": "#6E7681" }
+  ]
+}

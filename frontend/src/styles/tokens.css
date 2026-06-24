@@ -1,0 +1,59 @@
+/*
+  Design tokens for the Shift Operations console.
+
+  Direction: an industrial control-room HMI panel, not a SaaS dashboard
+  template. Graphite panel backgrounds, an amber signal-light accent
+  (echoes the indicator lamps on real plant equipment), hairline dividers,
+  square corners. Data colors (productive/failure/idle/etc) are owned by
+  the backend's ActivityConfiguration.display_color and are NOT redefined
+  here, so the UI accent palette and the data palette share one source of
+  truth without colliding.
+*/
+
+:root {
+  /* Surfaces */
+  --panel-0: #0E1012;      /* app background */
+  --panel-1: #16191C;      /* primary panel surface */
+  --panel-2: #1D2125;      /* raised/inset surface (cards, inputs) */
+  --panel-3: #262B30;      /* hover / active surface */
+  --hairline: #33393F;     /* dividers, borders */
+  --hairline-strong: #454D54;
+
+  /* Text */
+  --text-primary: #E8E6E1;
+  --text-secondary: #9BA3AA;
+  --text-tertiary: #6B7378;
+
+  /* Signal accent (amber indicator-light) */
+  --signal-amber: #F2A33C;
+  --signal-amber-dim: #8A5E22;
+  --signal-amber-glow: rgba(242, 163, 60, 0.18);
+
+  /* Status echoes (kept in sync conceptually with backend category colors,
+     used only for UI chrome, never for chart series - those always come
+     from the API's display_color field) */
+  --status-good: #4CAF8F;
+  --status-warn: #D9B44A;
+  --status-bad: #C44536;
+
+  /* Typography */
+  --font-display: "Oswald", "Arial Narrow", sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* Radii: deliberately near-zero, panel-instrument aesthetic */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+
+  /* Shadows */
+  --shadow-panel: 0 1px 0 rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.25);
+}

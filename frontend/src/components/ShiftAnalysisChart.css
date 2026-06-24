@@ -1,0 +1,86 @@
+.shift-chart {
+  position: relative;
+}
+
+.shift-chart--empty {
+  padding: var(--space-6);
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.shift-chart__scroll {
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+
+.shift-chart__svg {
+  display: block;
+}
+
+.shift-chart__gridline {
+  stroke: var(--hairline);
+  stroke-width: 1;
+}
+
+.shift-chart__gridline--midnight {
+  stroke: var(--hairline-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.shift-chart__gridline-vertical {
+  stroke: var(--hairline);
+  stroke-width: 1;
+}
+
+.shift-chart__y-label {
+  fill: var(--text-tertiary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.shift-chart__x-label {
+  fill: var(--text-secondary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.shift-chart__block {
+  cursor: pointer;
+  transition: opacity 0.1s;
+}
+
+.shift-chart__tooltip {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  background: var(--panel-2);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  box-shadow: var(--shadow-panel);
+  pointer-events: none;
+}
+
+.shift-chart__tooltip-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.shift-chart__tooltip-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.shift-chart__tooltip-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+}

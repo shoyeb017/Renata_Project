@@ -1,0 +1,29 @@
+{
+  "settings": [
+    {
+      "configuration_name": "breakdown_streak_minimum_events",
+      "configuration_value": "3",
+      "description": "Minimum number of consecutive failure-category events to qualify as a breakdown streak."
+    },
+    {
+      "configuration_name": "breakdown_streak_minimum_hours",
+      "configuration_value": "5",
+      "description": "Minimum cumulative duration (hours) across the streak's events to qualify as a breakdown streak."
+    },
+    {
+      "configuration_name": "breakdown_streak_max_gap_hours",
+      "configuration_value": "4",
+      "description": "Maximum gap (hours) allowed between two failure events for them to be considered part of the same continuous streak."
+    },
+    {
+      "configuration_name": "efficiency_low_threshold_pct",
+      "configuration_value": "70",
+      "description": "Efficiency score (%) below which a day/period is flagged as low-efficiency in insights."
+    },
+    {
+      "configuration_name": "insight_minimum_sample_hours",
+      "configuration_value": "1",
+      "description": "Minimum total hours of data required in a bucket before an insight is generated about it (avoids noisy conclusions from tiny samples)."
+    }
+  ]
+}
