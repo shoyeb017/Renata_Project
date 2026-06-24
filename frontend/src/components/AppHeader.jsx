@@ -5,7 +5,7 @@ export default function AppHeader({ dateRange }) {
     <header className="app-header">
       <div className="app-header__brand">
         <span className="app-header__signal" aria-hidden="true" />
-        <h1 className="app-header__title">Shift Ops Console</h1>
+        <h1 className="app-header__title">Employee Shift Operational Analytics Dashboard</h1>
       </div>
       {dateRange && (
         <span className="app-header__range mono">
