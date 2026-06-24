@@ -8,23 +8,29 @@ def seed_activities(apps, schema_editor):
     )
 
     activities = [
-    ("Breakdown", False, "Failure", "#EF4444"),
-    ("Machine Jam", False, "Failure", "#F97316"),
-    ("Power Failure", False, "Failure", "#DC2626"),
-    ("Unknown Failure", False, "Failure", "#B91C1C"),
+        # Failure
+        ("Breakdown", False, "Failure", "#EF4444"),
+        ("Machine Jam", False, "Failure", "#DC2626"),
+        ("Power Failure", False, "Failure", "#B91C1C"),
+        ("Unknown Failure", False, "Failure", "#F87171"),
 
-    ("Cleaning", False, "Planned Downtime", "#8B5CF6"),
-    ("Maintenance", False, "Planned Downtime", "#7C3AED"),
+        # Planned Downtime
+        ("Cleaning", False, "Planned Downtime", "#F59E0B"),
+        ("Maintenance", False, "Planned Downtime", "#D97706"),
 
-    ("Idle", False, "Idle", "#6B7280"),
+        # Idle
+        ("Idle", False, "Idle", "#6B7280"),
 
-    ("Material Shortage", False, "Logistics", "#F59E0B"),
+        # Logistics
+        ("Material Shortage", False, "Logistics", "#8B5CF6"),
 
-    ("Other", False, "Uncategorized", "#94A3B8"),
+        # Uncategorized
+        ("Other", False, "Uncategorized", "#94A3B8"),
 
-    ("Quality Check", True, "Productive", "#14B8A6"),
-    ("Setup", True, "Productive", "#3B82F6"),
-    ("Training", True, "Productive", "#22C55E"),
+        # Productive
+        ("Quality Check", True, "Productive", "#10B981"),
+        ("Setup", True, "Productive", "#059669"),
+        ("Training", True, "Productive", "#34D399"),
     ]
 
     for name, productive, category, color in activities:
