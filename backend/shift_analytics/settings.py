@@ -16,6 +16,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "True") == "True"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 INSTALLED_APPS = [
+    "unfold",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -104,6 +105,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # REST Framework
@@ -122,3 +124,9 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 # Path to the source dataset CSV. Override via env var to point at a
 # different dataset without touching any code - see README "Swappable dataset".
 DATASET_PATH = os.environ.get("DATASET_PATH", str(BASE_DIR / "data" / "shift_data.csv"))
+
+UNFOLD = {
+    "SITE_TITLE": "Renata Admin",
+    "SITE_HEADER": "Renata Shift Analytics",
+    "SITE_SYMBOL": "dashboard",
+}
